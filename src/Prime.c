@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <math.h>
 
 int isPrime(unsigned int number) {
@@ -14,5 +15,3 @@ int isPrime(unsigned int number) {
     
     return 1;  
 }
-
-

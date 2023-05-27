@@ -98,13 +98,14 @@ void* producer(void* arg) {
 
     for (int i = 0; i < N; i++) {
         int* item = malloc(sizeof(int));
-        *item = rand() % 900000 + 100000;  // Generate a random 6-digit number
+        *item = (rand() % 900000) + 100000;  // Generate a random 6-digit positive number
         enqueue(queue, item);
         usleep(1000);  // Sleep for 1 millisecond
     }
 
     return NULL;
 }
+
 
 void processTask(void* task) {
     int* number = (int*)task;
@@ -157,10 +158,17 @@ ActiveObject* getActiveObject(void* obj) {
 
 void stopActiveObject(ActiveObject* activeObj) {
     pthread_mutex_lock(&activeObj->activeMutex); // Lock the active mutex
-    activeObj->active = 0;
-    pthread_mutex_unlock(&activeObj->activeMutex); // Unlock the active mutex
-    pthread_join(activeObj->thread, NULL);
+    if (activeObj->active) {
+        activeObj->active = 0;
+        pthread_mutex_unlock(&activeObj->activeMutex); // Unlock the active mutex
+        pthread_join(activeObj->thread, NULL);
+    } else {
+        pthread_mutex_unlock(&activeObj->activeMutex); // Unlock the active mutex
+    }
 }
+
+
+
 
 int main(int argc, char** argv) {
     int N = 2;
@@ -170,26 +178,32 @@ int main(int argc, char** argv) {
 
     printf("Starting the pipeline with N = %d\n", N);
 
-    ThreadSafeQueue queue;
-    initQueue(&queue);
+    // ThreadSafeQueue queue;
+    // initQueue(&queue);
 
-    ActiveObject* ao1 = createActiveObject(&queue, processTask);
-    ActiveObject* ao2 = createActiveObject(&queue, processTask2);
-    ActiveObject* ao3 = createActiveObject(&queue, processTask3);
-    ActiveObject* ao4 = createActiveObject(&queue, processTask4);
+    // ActiveObject* ao1 = createActiveObject(&queue, processTask);
+    // ActiveObject* ao2 = createActiveObject(&queue, processTask2);
+    // ActiveObject* ao3 = createActiveObject(&queue, processTask3);
+    // ActiveObject* ao4 = createActiveObject(&queue, processTask4);
 
-    ao1->active = N;
+    // pthread_mutex_lock(&ao1->activeMutex);
+    // if (!ao1->active) {
+    //     ao1->active = N;
+    // }
+    // pthread_mutex_unlock(&ao1->activeMutex);
 
-    ProducerArguments producerArgs = { ao1, N, time(NULL) };
-    pthread_t producerThread;
-    pthread_create(&producerThread, NULL, producer, &producerArgs);
 
-    stopActiveObject(ao1);
-    stopActiveObject(ao2);
-    stopActiveObject(ao3);
-    stopActiveObject(ao4);
 
-    pthread_join(producerThread, NULL);
+    // ProducerArguments producerArgs = { ao1, N, time(NULL) };
+    // pthread_t producerThread;
+    // pthread_create(&producerThread, NULL, producer, &producerArgs);
+
+    // stopActiveObject(ao1);
+    // stopActiveObject(ao2);
+    // stopActiveObject(ao3);
+    // stopActiveObject(ao4);
+
+    // pthread_join(producerThread, NULL);
 
     return 0;
 }

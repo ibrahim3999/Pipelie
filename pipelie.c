@@ -1,264 +1,276 @@
-#include <stdio.h>
+#include <math.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include <math.h>
+#include <stdio.h>
+#include <errno.h>
 #include <unistd.h>
 #include <time.h>
 
-typedef struct Node {
-    void* data;
-    struct Node* next;
-} Node;
 
-typedef struct {
-    Node* head;
-    Node* tail;
+typedef struct node {
+    void *data;
+    struct node *next;
+} node;
+
+typedef struct queue {
+    node *head;
+    node *tail;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
-} Queue;
+} queue;
 
-typedef struct {
-    Queue* q;
-    void* (*func)(void*);
-    pthread_t worker;
-    bool stop_requested;
-} ActiveObject;
+typedef struct activeObject {
+    pthread_t pthr;
+    queue *queue;
+    void *(*func)(void *);
+} activeObject;
 
-typedef struct {
-    unsigned int number;
-    bool isPrime;
-} NumberResult;
+activeObject *AO1, *AO2, *AO3, *AO4;
 
-Queue* createQueue() {
-    Queue* q = malloc(sizeof(Queue));
-    if (q == NULL) {
-        fprintf(stderr, "Failed to allocate memory for queue\n");
-        exit(EXIT_FAILURE);
+bool is_prime(unsigned int num)
+{
+    if (num < 2)
+        return false;
+    
+    for (unsigned int i = 2; i * i <= num; i++)
+    {
+        if (num % i == 0)
+            return false;
     }
-    q->head = NULL;
-    q->tail = NULL;
-    pthread_mutex_init(&q->mutex, NULL);
-    pthread_cond_init(&q->cond, NULL);
-    return q;
+    
+    return true;
 }
 
-void* enqueue(Queue* q, void* item) {
-    Node* new_node = malloc(sizeof(Node));
-    if (new_node == NULL) {
-        fprintf(stderr, "Failed to allocate memory for new node\n");
+
+void enqueue(queue *que, void *item)
+{
+    node *new_node = malloc(sizeof(node));
+    if (new_node == NULL)
+    {
+        fprintf(stderr, "Allocate Memmory failed.\n");
         exit(EXIT_FAILURE);
     }
+
     new_node->data = item;
     new_node->next = NULL;
 
-    pthread_mutex_lock(&q->mutex);
-    if (q->tail != NULL) {
-        q->tail->next = new_node;
-    } else if(q->head == NULL) {
-        q->head = new_node;
-    }else if(q->tail  == NULL){
-         q->tail = new_node;
+    pthread_mutex_lock(&(que->mutex));
+    
+    if (que->head == NULL)
+    {
+        que->head = new_node;
+        que->tail = new_node;
     }
-    pthread_cond_signal(&q->cond);
-    pthread_mutex_unlock(&q->mutex);
+    else
+    {
+        que->tail->next = new_node;
+        que->tail = new_node;
+    }
+    
+    pthread_cond_signal(&(que->cond));
+    pthread_mutex_unlock(&(que->mutex));
 }
 
-void* dequeue(Queue* q) {
-    pthread_mutex_lock(&q->mutex);
-    while (q->head == NULL) {
-        pthread_cond_wait(&q->cond, &q->mutex);
+
+void *dequeue(queue *que)
+{
+    pthread_mutex_lock(&(que->mutex));
+    
+    while (que->head == NULL)
+    {
+        pthread_cond_wait(&(que->cond), &(que->mutex));
     }
-
-    Node* head = q->head;
-    void* item = head->data;
-    q->head = head->next;
-    if (q->head == NULL) {
-        q->tail = NULL;
+    
+    node *head = que->head;
+    void *item = head->data;
+    que->head = head->next;
+    
+    if (que->head == NULL)
+    {
+        que->tail = NULL;
     }
-
-    pthread_mutex_unlock(&q->mutex);
-
+    
+    pthread_mutex_unlock(&(que->mutex));
+    
     free(head);
     return item;
 }
 
-void freeQueue(Queue* q) {
-    pthread_mutex_lock(&q->mutex);
-    Node* current = q->head;
-    while (current != NULL) {
-        Node* to_free = current;
-        current = current->next;
-        free(to_free);
-    }
-    pthread_mutex_unlock(&q->mutex);
-    pthread_mutex_destroy(&q->mutex);
-    pthread_cond_destroy(&q->cond);
-    free(q);
-}
 
-void* activeObjectThread(void* arg) {
-    ActiveObject* self = (ActiveObject*)arg;
-    if (self == NULL) {
-        fprintf(stderr, "Invalid active object\n");
-        return NULL;
-    }
-
-    void* task;
-    while (true) {
-        task = dequeue(self->q);
-        if (task == NULL) {
-            break;
-        }
-        if (self->stop_requested) {
-            break;
-        }
+void *start(void *arg){
+    activeObject *self = (activeObject *)arg;
+    void *task;
+    while ((task = dequeue(self->queue)) != NULL)
+    {
         self->func(task);
     }
-
     return NULL;
 }
 
-ActiveObject* createActiveObject(void* (*func)(void*)) {
-    ActiveObject* obj = malloc(sizeof(ActiveObject));
-    if (obj == NULL) {
-        fprintf(stderr, "Failed to allocate memory for active object\n");
+activeObject *createActiveObject(void *(*func)(void *))
+{
+    activeObject *obj = malloc(sizeof(activeObject));
+    if (obj == NULL)
+    {
+        fprintf(stderr, "Allocate Memmory failed.\n");
         exit(EXIT_FAILURE);
     }
-    obj->q = createQueue();
+    obj->queue = malloc(sizeof(queue));
+    if (obj->queue == NULL)
+    {
+        fprintf(stderr, "Allocate Memmory failed.\n");
+        exit(EXIT_FAILURE);
+    }
+    pthread_mutex_init(&(obj->queue->mutex), NULL);
+    pthread_cond_init(&(obj->queue->cond), NULL);
+    obj->queue->head = NULL;
+    obj->queue->tail = NULL;
     obj->func = func;
-    obj->stop_requested = false;
-    pthread_create(&obj->worker, NULL, activeObjectThread, obj);
+    pthread_create(&(obj->pthr), NULL, start, obj);
     return obj;
 }
 
-void stop(ActiveObject* obj) {
-    obj->stop_requested = true;
-    enqueue(obj->q, NULL);
-    pthread_join(obj->worker, NULL);
-    freeQueue(obj->q);
+void freeQueue(queue *queue)
+{
+    pthread_mutex_lock(&(queue->mutex));
+    node *current = queue->head;
+    while (current != NULL)
+    {
+        node *to_free = current;
+        current = current->next;
+        free(to_free);
+    }
+    pthread_mutex_unlock(&(queue->mutex));
+    pthread_mutex_destroy(&(queue->mutex));
+    pthread_cond_destroy(&(queue->cond));
+    free(queue);
+}
+
+void stop(activeObject *obj)
+{
+    enqueue(obj->queue, NULL);
+    pthread_join(obj->pthr, NULL);
+    freeQueue(obj->queue);
     free(obj);
 }
 
-Queue* getQueue(ActiveObject* obj) {
-    return obj->q;
+void stopAll(activeObject *ao1, activeObject *ao2, activeObject *ao3, activeObject *ao4)
+{
+    stop(ao1);
+    stop(ao2);
+    stop(ao3);
+    stop(ao4);
 }
 
-bool isPrime(unsigned int num) {
-    if (num < 2) return false;
-    if (num == 2) return true;
-    if (num % 2 == 0) return false;
-    for (unsigned int i = 3; i <= sqrt(num); i += 2) {
-        if (num % i == 0) return false;
-    }
-    return true;
+queue *getQueue(activeObject *obj)
+{
+    return obj->queue;
 }
 
-void* first_func(void* arg) {
-    ActiveObject* second_AO = (ActiveObject*)arg;
-    NumberResult* result = malloc(sizeof(NumberResult));
-    if (result == NULL || second_AO == NULL) {
-        return NULL;
-    }
-    result->number = rand() % 900000 + 100000;
-    result->isPrime = isPrime(result->number);
-    printf("%u\n%s\n", result->number, result->isPrime ? "true" : "false");
-    printf("Yes\n");
-    enqueue(getQueue(second_AO), result);
-    printf("Yes\n");
-    return NULL;
-}
+void *firstTaskFunc(void *argument)
+{
+    unsigned int *number_ptr = (unsigned int *)argument;
 
-void* second_func(void* arg) {
-    printf("Yes\n");
-    ActiveObject* third_AO = (ActiveObject*)arg;
-    NumberResult* result = (NumberResult*)dequeue(getQueue(third_AO));
-    if (result == NULL) {
-        // Enqueue a placeholder task to keep the active object running
-        enqueue(getQueue(third_AO), NULL);
-        return NULL;
-    }
+    printf("%u\n%s\n", *number_ptr ,is_prime(*number_ptr) ? "true" : "false");
 
-    result->number += 11;
-    result->isPrime = isPrime(result->number);
-    printf("%u\n%s\n", result->number, result->isPrime ? "true" : "false");
-    enqueue(getQueue(third_AO), result);
+    enqueue(getQueue(AO2), number_ptr);
 
     return NULL;
 }
 
-void* third_func(void* arg) {
-    ActiveObject* fourth_AO = (ActiveObject*)arg;
+void *secondTaskFunc(void *argument)
+{
+    unsigned int *number = (unsigned int *)argument;
 
-    while (true) {
-        NumberResult* result = (NumberResult*)dequeue(getQueue(fourth_AO));
-        if (result == NULL) {
-            break;
+    *number += 11;
+
+    printf("%u\n%s\n", *number, is_prime(*number) ? "true" : "false");
+
+    enqueue(getQueue(AO3), number);
+
+    return NULL;
+
+}
+
+void *thirdTaskFunc(void *argument)
+{
+    unsigned int *number = (unsigned int *)argument;
+
+    *number -= 13;
+
+    printf("%u\n%s\n", *number, is_prime(*number) ? "true" : "false");
+
+    enqueue(getQueue(AO4), number);
+
+    return NULL;
+
+}
+
+
+
+void *fourthTaskFunc(void *argument)
+{
+    unsigned int *number = (unsigned int *)argument;
+
+    *number += 2;
+
+    printf("%u\n", *number);
+
+    free(number);
+
+    return NULL;
+
+}
+
+void initializeActiveObjects(activeObject **ao1, activeObject **ao2, activeObject **ao3, activeObject **ao4)
+{
+    *ao1 = createActiveObject(firstTaskFunc);
+    *ao2 = createActiveObject(secondTaskFunc);
+    *ao3 = createActiveObject(thirdTaskFunc);
+    *ao4 = createActiveObject(fourthTaskFunc);
+}
+
+void generateAndEnqueueNumbers(activeObject *ao, int numIterations)
+{
+    for (int i = 0; i < numIterations; i++)
+    {
+        unsigned int *num = malloc(sizeof(unsigned int));
+        *num = rand() % 900000 + 100000;
+        enqueue(getQueue(ao), num);
+        printf("\n");
+
+        if (i < numIterations - 1) {
+            sleep(1);
         }
-
-        result->number -= 13;
-        result->isPrime = isPrime(result->number);
-        printf("%u\n%s\n", result->number, result->isPrime ? "true" : "false");
-        enqueue(getQueue(fourth_AO), result);
     }
-
-    return NULL;
 }
 
-void* fourth_func(void* arg) {
-    ActiveObject* arg_obj = (ActiveObject*)arg;
-
-    while (true) {
-        NumberResult* result = (NumberResult*)dequeue(getQueue(arg_obj));
-        if (result == NULL) {
-            break;
-        }
-
-        result->number += 2;
-        printf("%u\n", result->number);
-        free(result);
+int main(int argc, char **argv)
+{
+    if(argc > 2)
+    {
+        printf("Too many Arguments! \n");
+        return 0;
     }
 
-    return NULL;
-}
-
-int main(int argc, char** argv) {
-    // Check if argument is provided
-    if (argc < 2) {
-        printf("Please provide a number of iterations as an argument.\n");
-        return 1;
+    if (argc < 2)
+    {
+        printf("Please add positive number of iterations.\n");
+        return 0;
     }
 
-    // Parse argument
     int iterations = atoi(argv[1]);
-    int seed = (argc == 3) ? atoi(argv[2]) : time(NULL);
+    
+    int seed = argc == 3 ? atoi(argv[2]) : time(NULL);
 
-    // Initialize the random number generator
     srand(seed);
 
-    // Initialize the active objects
-    ActiveObject* first_AO = createActiveObject(first_func);
-    ActiveObject* second_AO = createActiveObject(second_func);
-    ActiveObject* third_AO = createActiveObject(third_func);
-    ActiveObject* fourth_AO = createActiveObject(fourth_func);
+    initializeActiveObjects(&AO1,&AO2,&AO3, &AO4);
 
-    // Generate random numbers and feed them to the first active object
+    generateAndEnqueueNumbers(AO1,iterations);
 
-    void* task = malloc(sizeof(ActiveObject*));
-    if (task == NULL) {
-        fprintf(stderr, "Failed to allocate memory for task\n");
-        return -1;
-    }
-    *(ActiveObject**)task = second_AO;
-    enqueue(getQueue(first_AO), task);
+    stopAll(AO1,AO2,AO3,AO4);
 
-    stop(fourth_AO); // Stop the fourth active object
-    fourth_AO = createActiveObject(fourth_func); // Restart the fourth active object
-    sleep(1); // Wait 1 second
-
-    // Stop the remaining active objects
-    stop(first_AO);
-    stop(second_AO);
-    stop(third_AO);
     return 0;
 }
